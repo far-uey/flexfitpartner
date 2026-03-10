@@ -1,28 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
-import L from 'leaflet';
 import { supabase } from './supabaseClient';
-
-// Fix Leaflet's default icon path issues with React
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-});
-
-function LocationPicker({ position, setPosition }: { position: L.LatLng | null, setPosition: (pos: L.LatLng) => void }) {
-  useMapEvents({
-    click(e) {
-      setPosition(e.latlng);
-    },
-  });
-
-  return position === null ? null : (
-    <Marker position={position}></Marker>
-  );
-}
 
 import {
   Banknote,
@@ -34,19 +12,117 @@ import {
   CheckCircle2,
   ArrowRight,
   Menu,
-  X
+  X,
+  MapPin,
+  ChevronDown,
+  AlertCircle
 } from 'lucide-react';
+
+interface District {
+  id: number;
+  name: string;
+}
+
+interface Zone {
+  id: number;
+  district_id: number;
+  name: string;
+}
 
 export default function App() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [fullName, setFullName] = useState('');
   const [gymName, setGymName] = useState('');
-  const [locationText, setLocationText] = useState('');
   const [whatsapp, setWhatsapp] = useState('');
-  const [hourlyRate, setHourlyRate] = useState('');
-  const [position, setPosition] = useState<L.LatLng | null>(null);
+  
+  // Database states
+  const [districts, setDistricts] = useState<District[]>([]);
+  const [zones, setZones] = useState<Zone[]>([]);
+  const [districtId, setDistrictId] = useState<number | ''>('');
+  const [zoneId, setZoneId] = useState<number | ''>('');
+  
+  // Loading states
+  const [isLoadingDistricts, setIsLoadingDistricts] = useState(true);
+  const [isLoadingZones, setIsLoadingZones] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitStatus, setSubmitStatus] = useState<'idle' | 'success' | 'error'>('idle');
+
+  // Fetch districts on mount
+  useEffect(() => {
+    const fetchDistricts = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('districts')
+          .select('*')
+          .order('name', { ascending: true });
+          
+        if (error) throw error;
+        if (data) {
+          setDistricts(data);
+          // Set Malappuram as default district
+          const malappuram = data.find(d => d.name.toLowerCase() === 'malappuram');
+          if (malappuram) {
+            setDistrictId(malappuram.id);
+          }
+        }
+      } catch (error: any) {
+        console.error('Error fetching districts:', error);
+        if (error.message?.includes('Failed to fetch') || error.message?.includes('fetch')) {
+          setFetchError('Failed to connect to database. Please check your Supabase URL, Anon Key, and CORS settings.');
+        }
+      } finally {
+        setIsLoadingDistricts(false);
+      }
+    };
+    
+    fetchDistricts();
+  }, []);
+
+  // Fetch zones when district changes
+  useEffect(() => {
+    const fetchZones = async () => {
+      if (districtId === '') {
+        setZones([]);
+        return;
+      }
+      
+      setIsLoadingZones(true);
+      try {
+        const { data, error } = await supabase
+          .from('zones')
+          .select('*')
+          .eq('district_id', districtId)
+          .order('name', { ascending: true });
+          
+        if (error) throw error;
+        if (data) setZones(data);
+      } catch (error) {
+        console.error('Error fetching zones:', error);
+      } finally {
+        setIsLoadingZones(false);
+      }
+    };
+    
+    fetchZones();
+  }, [districtId]);
+
+  // Phone validation
+  const isPhoneValid = useMemo(() => {
+    const phoneRegex = /^[0-9]{10}$/;
+    return phoneRegex.test(whatsapp);
+  }, [whatsapp]);
+
+  const showPhoneError = whatsapp.length > 0 && !isPhoneValid;
+
+  const isFormValid = fullName && gymName && isPhoneValid && districtId !== '' && zoneId !== '';
+
+  const handleDistrictChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    setDistrictId(val === '' ? '' : parseInt(val, 10));
+    setZoneId(''); // Reset zone when district changes
+  };
 
   const scrollToWaitlist = () => {
     const element = document.getElementById('waitlist-section');
@@ -57,25 +133,25 @@ export default function App() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!position) {
-      alert("Please select your gym's exact location on the map.");
-      return;
-    }
+    if (!isFormValid) return;
     
     setIsSubmitting(true);
     setSubmitStatus('idle');
 
     try {
+      const selectedDistrict = districts.find(d => d.id === districtId)?.name || '';
+      const selectedZone = zones.find(z => z.id === zoneId)?.name || '';
+
       const { error } = await supabase
-        .from('gyms')
+        .from('gym_leads')
         .insert([
           {
-            name: gymName,
-            address: locationText,
-            contact_number: whatsapp,
-            hourly_rate: parseInt(hourlyRate) || 0,
-            location: `POINT(${position.lng} ${position.lat})`,
-            bank_details: { account_holder_name: fullName }
+            gym_name: gymName,
+            owner_name: fullName,
+            phone_number: whatsapp,
+            district: selectedDistrict,
+            zone: selectedZone,
+            status: 'pending'
           }
         ]);
 
@@ -84,14 +160,16 @@ export default function App() {
       setSubmitStatus('success');
       setFullName('');
       setGymName('');
-      setLocationText('');
       setWhatsapp('');
-      setHourlyRate('');
-      setPosition(null);
+      setDistrictId('');
+      setZoneId('');
       
       setTimeout(() => setSubmitStatus('idle'), 5000);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error submitting form:', error);
+      if (error.message?.includes('Failed to fetch') || error.message?.includes('fetch')) {
+        setFetchError('Failed to connect to database. Please check your Supabase URL, Anon Key, and CORS settings.');
+      }
       setSubmitStatus('error');
     } finally {
       setIsSubmitting(false);
@@ -168,7 +246,7 @@ export default function App() {
             transition={{ duration: 0.5, delay: 0.1 }}
             className="text-5xl md:text-6xl lg:text-7xl font-display font-bold tracking-tight mb-6 max-w-4xl leading-[1.1]"
           >
-            Stop Losing Money on <span className="text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-500">Empty Gym Slots.</span>
+            Stop Losing Money on <span className="text-brand-blue">Empty Gym Slots.</span>
           </motion.h1>
 
           <motion.p 
@@ -387,7 +465,19 @@ export default function App() {
                 </div>
               ) : (
                 <form className="space-y-6" onSubmit={handleSubmit}>
-                  {submitStatus === 'error' && (
+                  {fetchError && (
+                    <div className="bg-red-500/10 border border-red-500/50 text-red-400 px-4 py-4 rounded-xl text-sm">
+                      <p className="font-bold mb-2 flex items-center gap-2">
+                        <AlertCircle size={16} /> Connection Error
+                      </p>
+                      <p className="mb-2">{fetchError}</p>
+                      <ul className="list-disc pl-5 space-y-1 text-red-400/80">
+                        <li>Ensure <code className="bg-black/30 px-1 rounded">VITE_SUPABASE_URL</code> and <code className="bg-black/30 px-1 rounded">VITE_SUPABASE_ANON_KEY</code> are set in your Environment Variables.</li>
+                        <li>Ensure this app's URL is added to your Supabase project's <strong>Authentication &gt; URL Configuration &gt; Site URL / Redirect URLs</strong> (or API Settings &gt; CORS Origins).</li>
+                      </ul>
+                    </div>
+                  )}
+                  {submitStatus === 'error' && !fetchError && (
                     <div className="bg-red-500/10 border border-red-500/50 text-red-400 px-4 py-3 rounded-xl text-sm">
                       There was an error submitting your details. Please try again.
                     </div>
@@ -395,13 +485,13 @@ export default function App() {
                   
                   <div className="grid md:grid-cols-2 gap-6">
                     <div className="space-y-2">
-                      <label htmlFor="fullName" className="block text-sm font-medium text-slate-300">Full Name</label>
+                      <label htmlFor="fullName" className="block text-sm font-medium text-slate-300">Owner Name</label>
                       <input 
                         type="text" 
                         id="fullName" 
                         value={fullName}
                         onChange={(e) => setFullName(e.target.value)}
-                        className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-brand-blue/50 focus:border-brand-blue transition-all"
+                        className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue transition-all"
                         placeholder="John Doe"
                         required
                       />
@@ -413,7 +503,7 @@ export default function App() {
                         id="gymName" 
                         value={gymName}
                         onChange={(e) => setGymName(e.target.value)}
-                        className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-brand-blue/50 focus:border-brand-blue transition-all"
+                        className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue transition-all"
                         placeholder="Iron Paradise"
                         required
                       />
@@ -422,28 +512,46 @@ export default function App() {
 
                   <div className="grid md:grid-cols-2 gap-6">
                     <div className="space-y-2">
-                      <label htmlFor="location" className="block text-sm font-medium text-slate-300">City/Location in Malappuram</label>
-                      <input 
-                        type="text" 
-                        id="location" 
-                        value={locationText}
-                        onChange={(e) => setLocationText(e.target.value)}
-                        className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-brand-blue/50 focus:border-brand-blue transition-all"
-                        placeholder="e.g. Manjeri, Tirur, Perinthalmanna"
-                        required
-                      />
+                      <label htmlFor="district" className="block text-sm font-medium text-slate-300">District</label>
+                      <div className="relative">
+                        <select 
+                          id="district" 
+                          value={districtId}
+                          onChange={handleDistrictChange}
+                          disabled={isLoadingDistricts}
+                          className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white appearance-none focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                          required
+                        >
+                          <option value="" className="bg-brand-black">
+                            {isLoadingDistricts ? "Loading districts..." : "Select District"}
+                          </option>
+                          {districts.map(d => (
+                            <option key={d.id} value={d.id} className="bg-brand-black">{d.name}</option>
+                          ))}
+                        </select>
+                        <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={18} />
+                      </div>
                     </div>
                     <div className="space-y-2">
-                      <label htmlFor="hourlyRate" className="block text-sm font-medium text-slate-300">Expected Hourly Rate (₹)</label>
-                      <input 
-                        type="number" 
-                        id="hourlyRate" 
-                        value={hourlyRate}
-                        onChange={(e) => setHourlyRate(e.target.value)}
-                        className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-brand-blue/50 focus:border-brand-blue transition-all"
-                        placeholder="e.g. 50"
-                        required
-                      />
+                      <label htmlFor="zone" className="block text-sm font-medium text-slate-300">Zone</label>
+                      <div className="relative">
+                        <select 
+                          id="zone" 
+                          value={zoneId}
+                          onChange={(e) => setZoneId(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
+                          disabled={districtId === '' || isLoadingZones}
+                          className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white appearance-none focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                          required
+                        >
+                          <option value="" className="bg-brand-black">
+                            {isLoadingZones ? "Loading zones..." : "Select Zone"}
+                          </option>
+                          {zones.map(z => (
+                            <option key={z.id} value={z.id} className="bg-brand-black">{z.name}</option>
+                          ))}
+                        </select>
+                        <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={18} />
+                      </div>
                     </div>
                   </div>
 
@@ -457,36 +565,24 @@ export default function App() {
                         type="tel" 
                         id="whatsapp" 
                         value={whatsapp}
-                        onChange={(e) => setWhatsapp(e.target.value)}
-                        className="flex-1 min-w-0 block w-full bg-black/50 border border-white/10 rounded-none rounded-r-xl px-4 py-3 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-brand-blue/50 focus:border-brand-blue transition-all"
+                        onChange={(e) => setWhatsapp(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                        className={`flex-1 min-w-0 block w-full bg-black/50 border ${showPhoneError ? 'border-red-500' : 'border-white/10'} rounded-none rounded-r-xl px-4 py-3 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 ${showPhoneError ? 'focus:ring-red-500/50' : 'focus:ring-brand-blue'} focus:border-brand-blue transition-all`}
                         placeholder="98765 43210"
                         required
                       />
                     </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-slate-300">Pin Gym Location on Map</label>
-                    <p className="text-xs text-slate-500 mb-2">Click on the map to set your exact location.</p>
-                    <div className="h-[300px] w-full rounded-xl overflow-hidden border border-white/10 relative z-0">
-                      <MapContainer 
-                        center={[11.0739, 76.0740]} // Default to Malappuram
-                        zoom={10} 
-                        style={{ height: '100%', width: '100%', backgroundColor: '#1a1a1a' }}
-                      >
-                        <TileLayer
-                          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-                        />
-                        <LocationPicker position={position} setPosition={setPosition} />
-                      </MapContainer>
-                    </div>
+                    {showPhoneError && (
+                      <p className="text-red-500 text-xs flex items-center gap-1 mt-1">
+                        <AlertCircle size={12} />
+                        Please enter a valid 10-digit WhatsApp number
+                      </p>
+                    )}
                   </div>
 
                   <button 
                     type="submit"
-                    disabled={isSubmitting}
-                    className="w-full bg-brand-blue hover:bg-blue-600 disabled:bg-blue-800 disabled:cursor-not-allowed text-white px-8 py-4 rounded-xl font-bold text-lg transition-all shadow-[0_0_20px_rgba(0,82,255,0.3)] hover:shadow-[0_0_30px_rgba(0,82,255,0.5)] mt-4 flex items-center justify-center"
+                    disabled={isSubmitting || !isFormValid}
+                    className="w-full bg-brand-blue hover:bg-blue-600 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white px-8 py-4 rounded-xl font-bold text-lg transition-all shadow-[0_0_20px_rgba(0,82,255,0.3)] hover:shadow-[0_0_30px_rgba(0,82,255,0.5)] mt-4 flex items-center justify-center"
                   >
                     {isSubmitting ? (
                       <span className="flex items-center gap-2">
