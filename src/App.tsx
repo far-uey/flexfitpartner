@@ -594,7 +594,7 @@ export default function App() {
                     )}
                   </button>
                   <p className="text-center text-xs text-slate-500 mt-4">
-                    By joining, you agree to our Terms of Service and Privacy Policy.
+                    By joining, you agree to our <a href="https://pollen-jaborosa-8f6.notion.site/Terms-Conditions-2ec5ca6f72a48004a930e7b134c33fcb" target="_blank" rel="noopener noreferrer" className="underline hover:text-white">Terms of Service</a> and <a href="https://pollen-jaborosa-8f6.notion.site/Privacy-Policy-2ec5ca6f72a48051b94df2dfd4005863" target="_blank" rel="noopener noreferrer" className="underline hover:text-white">Privacy Policy</a>.
                   </p>
                 </form>
               )}
@@ -617,9 +617,10 @@ export default function App() {
             </div>
             <div className="flex flex-col md:items-end justify-center space-y-4">
               <div className="flex flex-wrap gap-4 text-sm text-slate-400">
-                <a href="#" className="hover:text-white transition-colors">Terms</a>
-                <a href="#" className="hover:text-white transition-colors">Privacy</a>
-                <a href="#" className="hover:text-white transition-colors">Contact Support</a>
+                <a href="https://pollen-jaborosa-8f6.notion.site/Terms-Conditions-2ec5ca6f72a48004a930e7b134c33fcb" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Terms</a>
+                <a href="https://pollen-jaborosa-8f6.notion.site/Privacy-Policy-2ec5ca6f72a48051b94df2dfd4005863" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Privacy</a>
+                <a href="https://wa.me/918113003620" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Contact Support</a>
+                <a href="mailto:flexfit.lab.app@gmail.com" className="hover:text-white transition-colors">Email Us</a>
               </div>
             </div>
           </div>
